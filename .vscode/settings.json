@@ -1,0 +1,33 @@
+{
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        ".dart_tool": true,
+        ".dart_tool/**": true,
+        ".idea": true,
+        ".idea/**": true,
+        ".vscode": true,
+        ".vscode/**": true,
+        "android": true,
+        "android/**": true,
+        "ios": true,
+        "ios/**": true,
+        "linux": true,
+        "linux/**": true,
+        "web": true,
+        "web/**": true,
+        "macos": true,
+        "macos/**": true,
+        "windows": true,
+        "windows/**": true,
+        ".flutter-plugins-dependencies": true,
+        ".gitignore": true,
+        ".hidden-items.json": true,
+        ".metadata": true,
+        "analysis_options.yaml": true,
+        "README.md": true
+    }
+}
