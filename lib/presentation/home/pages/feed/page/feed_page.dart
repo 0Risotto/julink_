@@ -1,3 +1,7 @@
+// lib/presentation/feed/pages/feed_page.dart
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:julink/common/helper/is_dark_mode.dart';
@@ -6,6 +10,33 @@ import 'package:julink/data/models/common/page_response.dart';
 import 'package:julink/data/models/posts/post.dart';
 import 'package:julink/data/repository/posts/post_repository.dart';
 import 'package:julink/data/sources/posts/post_service.dart';
+
+/// Robust base64 -> bytes decoder that tolerates:
+/// - data URI prefixes (e.g. "data:image/png;base64,....")
+/// - whitespace/newlines
+/// - missing "=" padding
+Uint8List? _decodeBase64Image(String? src) {
+  if (src == null || src.isEmpty) return null;
+
+  // Remove possible data URI prefix
+  var s = src.split(',').last;
+
+  // Remove whitespace/newlines
+  s = s.replaceAll(RegExp(r'\s+'), '');
+
+  // Fix missing padding
+  final mod4 = s.length % 4;
+  if (mod4 != 0) {
+    s = s.padRight(s.length + (4 - mod4), '=');
+  }
+
+  try {
+    return base64Decode(s);
+  } catch (e) {
+    debugPrint('Base64 decode failed: $e');
+    return null;
+  }
+}
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -189,53 +220,21 @@ class _PostsContentState extends State<PostsContent> {
     }
   }
 
-  // ---------- IMAGE HELPERS ----------
-  // TODO: Map your Post model to an image URL here.
-  // Example options you might have:
-  //   return post.imageUrl;                 // single URL field
-  //   return (post.images?.isNotEmpty ?? false) ? post.images!.first : null;
-  //   return post.mediaUrl;
-  String? _firstImageUrl(Post post) {
-    // CHANGE THIS LINE to match your actual Post model:
-    // If you don't have images yet, leave as null.
-    // ignore: dead_code
-    return null;
-    // Example:
-    // return post.imageUrl;
-    // or:
-    // return (post.images?.isNotEmpty ?? false) ? post.images!.first : null;
-  }
-
-  Widget _postImage(String url) {
+  // Build the image widget from base64 bytes
+  Widget _postMemoryImage(Uint8List bytes) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: AspectRatio(
         aspectRatio: 16 / 9,
-        child: Image.network(
-          url,
+        child: Image.memory(
+          bytes,
           fit: BoxFit.cover,
-          loadingBuilder: (ctx, child, progress) {
-            if (progress == null) return child;
-            return const Center(
-              child: SizedBox(
-                height: 24,
-                width: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            );
-          },
-          errorBuilder: (ctx, err, stack) {
-            return Container(
-              color: Colors.black12,
-              alignment: Alignment.center,
-              child: const Icon(Icons.broken_image_outlined),
-            );
-          },
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
         ),
       ),
     );
   }
-  // -----------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -249,7 +248,9 @@ class _PostsContentState extends State<PostsContent> {
         final isLiked = _liked[id] ?? false;
         final likeCount = _likeCounts[id] ?? (post.likeCount ?? 0);
         final isBusy = _likingInFlight.contains(id);
-        final maybeImageUrl = _firstImageUrl(post);
+
+        // Decode the post image (base64 string) if present
+        final Uint8List? imageBytes = _decodeBase64Image(post.image);
 
         return Center(
           child: ConstrainedBox(
@@ -292,7 +293,7 @@ class _PostsContentState extends State<PostsContent> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    "@${post.authorUsername ?? 'Unknown'}",
+                                    "@${post.authorUsername}",
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 15,
@@ -354,9 +355,8 @@ class _PostsContentState extends State<PostsContent> {
                         const SizedBox(height: 12),
 
                         // IMAGE (above title)
-                        if (maybeImageUrl != null &&
-                            maybeImageUrl.isNotEmpty) ...[
-                          _postImage(maybeImageUrl),
+                        if (imageBytes != null) ...[
+                          _postMemoryImage(imageBytes),
                           const SizedBox(height: 12),
                         ],
 
@@ -598,16 +598,20 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
 
     setState(() => _posting = true);
     try {
+      // create post with selected tag IDs
       final created =
           await widget.repo.createPost(content, _selectedTags.toList()) as Post;
 
+      // clear inputs
       _titleCtrl.clear();
       _contentCtrl.clear();
       _selectedTags.clear();
-      setState(() {});
+      setState(() {}); // refresh chips
 
+      // show in feed immediately
       widget.onCreated(created);
 
+      // ask whether to add photo
       final wantsImage = await _askAddPhotoDialog();
       if (wantsImage == true) {
         await _pickAndUploadImage(created.id);
