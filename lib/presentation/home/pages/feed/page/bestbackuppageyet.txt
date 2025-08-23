@@ -34,7 +34,6 @@ Uint8List? _decodeBase64Image(String? src) {
 }
 
 /// Local copyWith so we can update a Post in-place after editing.
-/// (You can move this into your Post model later.)
 extension _PostCopy on Post {
   Post copyWith({
     String? content,
@@ -57,6 +56,21 @@ extension _PostCopy on Post {
       likeCount: likeCount ?? this.likeCount,
       image: image ?? this.image,
       commentsCount: commentsCount ?? this.commentsCount,
+    );
+  }
+}
+
+/// Local copyWith for Comment (in case your model doesn't include one).
+extension _CommentCopy on Comment {
+  Comment copyWith({String? content, DateTime? createdAt, DateTime? editedAt}) {
+    return Comment(
+      id: id,
+      commenterId: commenterId,
+      commenterUsername: commenterUsername,
+      postId: postId,
+      content: content ?? this.content,
+      createdAt: createdAt ?? this.createdAt,
+      editedAt: editedAt ?? this.editedAt,
     );
   }
 }
@@ -132,7 +146,8 @@ class _FeedPageState extends State<FeedPage> {
             const SizedBox(height: 20),
             const Text("End of Feed"),
             const SizedBox(height: 10),
-            // Your simple ads widget
+            // If your ads widget is named AdsContainer, use that here:
+            // const AdsContainer(),
             AdsContainer33(),
           ],
         ),
@@ -161,10 +176,9 @@ class _PostsContentState extends State<PostsContent> {
   final Map<int, int> _commentCounts = {}; // postId -> count
   final Set<int> _openComments = {}; // which posts have the comments panel open
 
-  // inline edit state for posts
-  final Set<int> _editingPostIds = {};
-  final Map<int, TextEditingController> _postTitleCtrls = {};
-  final Map<int, TextEditingController> _postContentCtrls = {};
+  // inline post editing state
+  final Set<int> _editingPosts = {};
+  final Map<int, TextEditingController> _postEditCtrls = {};
   final Set<int> _savingPostIds = {};
 
   @override
@@ -189,10 +203,7 @@ class _PostsContentState extends State<PostsContent> {
 
   @override
   void dispose() {
-    for (final c in _postTitleCtrls.values) {
-      c.dispose();
-    }
-    for (final c in _postContentCtrls.values) {
+    for (final c in _postEditCtrls.values) {
       c.dispose();
     }
     super.dispose();
@@ -244,59 +255,38 @@ class _PostsContentState extends State<PostsContent> {
   }
 
   void _startInlineEdit(Post post) {
-    _editingPostIds.add(post.id);
-    _postTitleCtrls[post.id]?.dispose();
-    _postContentCtrls[post.id]?.dispose();
-    _postTitleCtrls[post.id] = TextEditingController(
-      text: post.postTitle ?? '',
-    );
-    _postContentCtrls[post.id] = TextEditingController(text: post.content);
+    _editingPosts.add(post.id);
+    _postEditCtrls[post.id]?.dispose();
+    _postEditCtrls[post.id] = TextEditingController(text: post.content);
     setState(() {});
   }
 
   void _cancelInlineEdit(Post post) {
-    _editingPostIds.remove(post.id);
-    _postTitleCtrls[post.id]?.dispose();
-    _postContentCtrls[post.id]?.dispose();
-    _postTitleCtrls.remove(post.id);
-    _postContentCtrls.remove(post.id);
+    _editingPosts.remove(post.id);
+    _postEditCtrls[post.id]?.dispose();
+    _postEditCtrls.remove(post.id);
     setState(() {});
   }
 
   Future<void> _saveInlineEdit(Post post) async {
-    final titleCtrl = _postTitleCtrls[post.id];
-    final contentCtrl = _postContentCtrls[post.id];
-    if (titleCtrl == null || contentCtrl == null) return;
-
-    final newTitle = titleCtrl.text.trim();
-    final newContent = contentCtrl.text.trim();
-
-    if (newContent.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Content cannot be empty')));
+    final ctrl = _postEditCtrls[post.id];
+    if (ctrl == null) return;
+    final newText = ctrl.text.trim();
+    if (newText.isEmpty || newText == post.content) {
+      _cancelInlineEdit(post);
       return;
     }
 
     setState(() => _savingPostIds.add(post.id));
     try {
-      await widget.repo.editPost(
-        post.id,
-        newContent,
-        post.taggedCollegeIds,
-        title: newTitle.isEmpty ? null : newTitle,
-      );
-
-      // Update local post
-      final idx = widget.posts.indexWhere((e) => e.id == post.id);
+      await widget.repo.editPost(post.id, newText, post.taggedCollegeIds);
+      final idx = widget.posts.indexWhere((p) => p.id == post.id);
       if (idx != -1) {
         widget.posts[idx] = widget.posts[idx].copyWith(
-          content: newContent,
-          postTitle: newTitle.isEmpty ? null : newTitle,
+          content: newText,
           editedAt: DateTime.now(),
         );
       }
-
       _cancelInlineEdit(post);
       ScaffoldMessenger.of(
         context,
@@ -307,7 +297,8 @@ class _PostsContentState extends State<PostsContent> {
         context,
       ).showSnackBar(const SnackBar(content: Text('Failed to edit post')));
     } finally {
-      if (mounted) setState(() => _savingPostIds.remove(post.id));
+      if (!mounted) return;
+      setState(() => _savingPostIds.remove(post.id));
     }
   }
 
@@ -352,8 +343,6 @@ class _PostsContentState extends State<PostsContent> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -373,10 +362,9 @@ class _PostsContentState extends State<PostsContent> {
             ? _relative(post.createdAt)
             : '${_relative(post.editedAt!)} • edited';
 
-        final editing = _editingPostIds.contains(id);
+        final isEditing = _editingPosts.contains(id);
         final saving = _savingPostIds.contains(id);
-        final titleCtrl = _postTitleCtrls[id];
-        final contentCtrl = _postContentCtrls[id];
+        final editCtrl = _postEditCtrls[id];
 
         return Center(
           child: ConstrainedBox(
@@ -384,15 +372,15 @@ class _PostsContentState extends State<PostsContent> {
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Card(
-                elevation: isDark ? 0 : 1.5,
+                elevation: context.isDarkMode ? 0 : 1.5,
                 shadowColor: Colors.black12,
-                color: isDark
+                color: context.isDarkMode
                     ? AppColors.darkCardBackground
                     : AppColors.lightCardBackground,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                   side: BorderSide(
-                    color: isDark ? Colors.white10 : Colors.black12,
+                    color: context.isDarkMode ? Colors.white10 : Colors.black12,
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -423,7 +411,7 @@ class _PostsContentState extends State<PostsContent> {
                                     style: TextStyle(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 15,
-                                      color: isDark
+                                      color: context.isDarkMode
                                           ? Colors.white
                                           : Colors.black,
                                     ),
@@ -433,7 +421,7 @@ class _PostsContentState extends State<PostsContent> {
                                     subtitle,
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: isDark
+                                      color: context.isDarkMode
                                           ? Colors.white54
                                           : Colors.black54,
                                     ),
@@ -445,17 +433,18 @@ class _PostsContentState extends State<PostsContent> {
                               icon: const Icon(Icons.more_horiz),
                               splashRadius: 20,
                               onSelected: (value) => _onMenuSelect(post, value),
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: ListTile(
-                                    leading: Icon(Icons.edit),
-                                    title: Text('Edit'),
-                                    dense: true,
-                                    contentPadding: EdgeInsets.zero,
+                              itemBuilder: (context) => [
+                                if (!isEditing)
+                                  const PopupMenuItem(
+                                    value: 'edit',
+                                    child: ListTile(
+                                      leading: Icon(Icons.edit),
+                                      title: Text('Edit'),
+                                      dense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
                                   ),
-                                ),
-                                PopupMenuItem(
+                                const PopupMenuItem(
                                   value: 'delete',
                                   child: ListTile(
                                     leading: Icon(Icons.delete_outline),
@@ -464,7 +453,7 @@ class _PostsContentState extends State<PostsContent> {
                                     contentPadding: EdgeInsets.zero,
                                   ),
                                 ),
-                                PopupMenuItem(
+                                const PopupMenuItem(
                                   value: 'share',
                                   child: ListTile(
                                     leading: Icon(Icons.share_outlined),
@@ -486,84 +475,85 @@ class _PostsContentState extends State<PostsContent> {
                           const SizedBox(height: 12),
                         ],
 
-                        // Title + Body (inline edit or read-only)
-                        if (!editing) ...[
-                          if ((post.postTitle ?? '').isNotEmpty) ...[
-                            Text(
-                              post.postTitle!,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                                color: isDark ? Colors.white : Colors.black,
-                              ),
+                        // Optional title
+                        if (post.postTitle != null &&
+                            post.postTitle!.isNotEmpty) ...[
+                          Text(
+                            post.postTitle!,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                              color: context.isDarkMode
+                                  ? Colors.white
+                                  : Colors.black,
                             ),
-                            const SizedBox(height: 6),
-                          ],
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+
+                        // Body (inline edit or read mode)
+                        if (!isEditing)
                           Text(
                             post.content,
                             softWrap: true,
                             style: TextStyle(
                               height: 1.4,
                               fontSize: 14,
-                              color: isDark ? Colors.white : Colors.black,
+                              color: context.isDarkMode
+                                  ? Colors.white
+                                  : Colors.black,
                             ),
-                          ),
-                        ] else ...[
-                          // Inline editor
-                          TextField(
-                            controller: titleCtrl,
-                            maxLines: 1,
-                            decoration: const InputDecoration(
-                              labelText: 'Title (optional)',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            enabled: !saving,
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: contentCtrl,
-                            minLines: 3,
-                            maxLines: 8,
-                            decoration: const InputDecoration(
-                              labelText: 'Content',
-                              border: OutlineInputBorder(),
-                            ),
-                            enabled: !saving,
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              TextButton(
-                                onPressed: saving
-                                    ? null
-                                    : () => _cancelInlineEdit(post),
-                                child: const Text('Cancel'),
+                              TextField(
+                                controller: editCtrl,
+                                minLines: 3,
+                                maxLines: 8,
+                                enabled: !saving,
+                                decoration: const InputDecoration(
+                                  hintText: 'Update your post…',
+                                  border: OutlineInputBorder(),
+                                ),
                               ),
-                              const SizedBox(width: 8),
-                              ElevatedButton(
-                                onPressed: saving
-                                    ? null
-                                    : () => _saveInlineEdit(post),
-                                child: saving
-                                    ? const SizedBox(
-                                        height: 18,
-                                        width: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Text('Save'),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  TextButton(
+                                    onPressed: saving
+                                        ? null
+                                        : () => _cancelInlineEdit(post),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton(
+                                    onPressed: saving
+                                        ? null
+                                        : () => _saveInlineEdit(post),
+                                    child: saving
+                                        ? const SizedBox(
+                                            height: 18,
+                                            width: 18,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : const Text('Save'),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
 
                         const SizedBox(height: 12),
                         Divider(
                           height: 1,
                           thickness: 1,
-                          color: isDark ? Colors.white10 : Colors.black12,
+                          color: context.isDarkMode
+                              ? Colors.white10
+                              : Colors.black12,
                         ),
                         const SizedBox(height: 4),
 
@@ -573,7 +563,7 @@ class _PostsContentState extends State<PostsContent> {
                           children: [
                             // LIKE
                             TextButton.icon(
-                              onPressed: isBusy
+                              onPressed: (isBusy || isEditing)
                                   ? null
                                   : () => _toggleLike(post),
                               icon: Icon(
@@ -586,15 +576,15 @@ class _PostsContentState extends State<PostsContent> {
                                 "$likeCount",
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark
+                                  color: context.isDarkMode
                                       ? Colors.white70
                                       : Colors.black54,
                                 ),
                               ),
                               style: TextButton.styleFrom(
-                                overlayColor: isDark
+                                overlayColor: (context.isDarkMode
                                     ? Colors.white10
-                                    : Colors.black12,
+                                    : Colors.black12),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
                                   vertical: 6,
@@ -607,29 +597,31 @@ class _PostsContentState extends State<PostsContent> {
 
                             // COMMENTS (toggle panel)
                             TextButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  if (_openComments.contains(id)) {
-                                    _openComments.remove(id);
-                                  } else {
-                                    _openComments.add(id);
-                                  }
-                                });
-                              },
+                              onPressed: isEditing
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        if (_openComments.contains(id)) {
+                                          _openComments.remove(id);
+                                        } else {
+                                          _openComments.add(id);
+                                        }
+                                      });
+                                    },
                               icon: const Icon(Icons.comment_rounded, size: 20),
                               label: Text(
-                                "",
+                                "$commentCount",
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark
+                                  color: context.isDarkMode
                                       ? Colors.white70
                                       : Colors.black54,
                                 ),
                               ),
                               style: TextButton.styleFrom(
-                                overlayColor: isDark
+                                overlayColor: (context.isDarkMode
                                     ? Colors.white10
-                                    : Colors.black12,
+                                    : Colors.black12),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
                                   vertical: 6,
@@ -642,21 +634,21 @@ class _PostsContentState extends State<PostsContent> {
 
                             // SHARE
                             TextButton.icon(
-                              onPressed: () {},
+                              onPressed: isEditing ? null : () {},
                               icon: const Icon(Icons.share_outlined, size: 20),
                               label: Text(
                                 "Share",
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark
+                                  color: context.isDarkMode
                                       ? Colors.white70
                                       : Colors.black54,
                                 ),
                               ),
                               style: TextButton.styleFrom(
-                                overlayColor: isDark
+                                overlayColor: (context.isDarkMode
                                     ? Colors.white10
-                                    : Colors.black12,
+                                    : Colors.black12),
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
                                   vertical: 6,
@@ -799,6 +791,7 @@ class _CommentsSectionState extends State<CommentsSection> {
 
     try {
       await widget.repo.editComment(c.id, newText);
+      // Update local list
       final idx = _comments.indexWhere((e) => e.id == c.id);
       if (idx != -1) {
         _comments[idx] = _comments[idx].copyWith(
@@ -1054,8 +1047,6 @@ class _CommentsSectionState extends State<CommentsSection> {
   }
 }
 
-/// END CommentsSection
-
 class CreatePostsContainer extends StatefulWidget {
   const CreatePostsContainer({
     super.key,
@@ -1071,7 +1062,7 @@ class CreatePostsContainer extends StatefulWidget {
 }
 
 class _CreatePostsContainerState extends State<CreatePostsContainer> {
-  final _titleCtrl = TextEditingController(); // optional, sent as postTitle
+  final _titleCtrl = TextEditingController(); // optional, not sent
   final _contentCtrl = TextEditingController();
   bool _posting = false;
 
@@ -1140,7 +1131,6 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
 
   Future<void> _submit() async {
     final content = _contentCtrl.text.trim();
-    final title = _titleCtrl.text.trim();
     if (content.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -1153,7 +1143,6 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
       final created = await widget.repo.createPost(
         content,
         _selectedTags.toList(),
-        title: title.isEmpty ? null : title,
       );
 
       _titleCtrl.clear();
@@ -1383,5 +1372,33 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
         ),
       ),
     );
+  }
+}
+
+class PeopleToFollowList extends StatefulWidget {
+  const PeopleToFollowList({super.key});
+
+  @override
+  State<PeopleToFollowList> createState() => _PeopleToFollowListState();
+}
+
+class _PeopleToFollowListState extends State<PeopleToFollowList> {
+  @override
+  Widget build(BuildContext context) {
+    return const Placeholder();
+  }
+}
+
+class AdsContainer extends StatefulWidget {
+  const AdsContainer({super.key});
+
+  @override
+  State<AdsContainer> createState() => _AdsContainerState();
+}
+
+class _AdsContainerState extends State<AdsContainer> {
+  @override
+  Widget build(BuildContext context) {
+    return const Placeholder();
   }
 }

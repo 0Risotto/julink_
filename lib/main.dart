@@ -11,7 +11,8 @@ import 'package:path_provider/path_provider.dart';
 // import your profile related stuff
 import 'package:julink/data/repository/profile/profile_repository.dart';
 import 'package:julink/data/sources/profile/profile_services.dart';
-// sponsored and explained by leti 
+
+// sponsored and explained by leti
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   HydratedBloc.storage = await HydratedStorage.build(

@@ -15,6 +15,9 @@ import 'package:julink/data/models/profile/profile.dart';
 import 'package:julink/data/sources/profile/profile_services.dart';
 import 'package:julink/data/repository/profile/profile_repository.dart';
 import 'package:julink/presentation/home/pages/profile/bloc/profile_cubit.dart';
+import 'package:julink/presentation/home/pages/profile/widget/getowncommentedposts.dart';
+import 'package:julink/presentation/home/pages/profile/widget/getownposts.dart';
+import 'package:julink/presentation/home/pages/profile/widget/ownlikedposts.dart';
 
 class ProfilePage extends StatefulWidget {
   final String token;
@@ -71,7 +74,7 @@ class _ProfilePageContainerState extends State<ProfilePageContainer>
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 2,
+      length: 3,
       vsync: this,
     ); // 2 tabs: own posts and liked posts
   }
@@ -337,14 +340,16 @@ class _ProfilePageContainerState extends State<ProfilePageContainer>
             tabs: [
               Tab(text: "Own Posts"),
               Tab(text: "Liked Posts"),
+              Tab(text: "Commented Posts"),
             ],
           ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                Container(child: Text("Own posts")),
-                Container(child: Text("Liked posts")),
+                OwnProfilePosts(authorId: widget.profile.id),
+                OwnLikedPosts(),
+                OwnCommentedPosts(),
               ],
             ),
           ),

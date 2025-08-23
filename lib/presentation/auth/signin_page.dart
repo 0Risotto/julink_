@@ -20,29 +20,16 @@ class SigninPage extends StatefulWidget {
 }
 
 class _SigninPageState extends State<SigninPage> {
-  // beginning of class
-
   // text controllers
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
-  //  final TextEditingController _changePasswordController =
-  //TextEditingController();
-  //final TextEditingController _confirmPasswordController =
-  //TextEditingController();
-  //  final TextEditingController _OTPController = TextEditingController();
-
-  // text controllers end
-  // functions
-  //
-
-  //token saver
+  // token saver
   Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('auth_token', token); // Save the token
+    await prefs.setString('auth_token', token);
   }
 
-  //
   void _formSubmit() async {
     final formData = {
       "username": _usernameController.text.trim(),
@@ -55,14 +42,17 @@ class _SigninPageState extends State<SigninPage> {
         body: jsonEncode(formData),
       );
       if (response.statusCode == 200) {
-        print("Success for Login method :) ");
         var token = response.body;
-
-        await (saveToken(token));
-        Navigator.push(context, MaterialPageRoute(builder: (_) => HomePage()));
+        await saveToken(token);
+        // ignore: use_build_context_synchronously
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const HomePage()),
+        );
       } else {
         _usernameController.clear();
         _passwordController.clear();
+        // ignore: use_build_context_synchronously
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Username or Password wrong. Please try again."),
@@ -72,17 +62,198 @@ class _SigninPageState extends State<SigninPage> {
         );
       }
     } catch (e) {
-      print("Error ${e}");
+      // You can show a snackbar here too if you want
+      debugPrint("Login error: $e");
     }
   }
 
-  // end of functions
+  // --- NEW: Fake Forgot Password popup ---
+  Future<void> _showForgotPasswordDialog() async {
+    final otpCtrl = TextEditingController();
+    final passCtrl = TextEditingController();
+    final repeatCtrl = TextEditingController();
 
-  //  widget
+    bool submitting = false;
+    bool showPass = false;
+    bool showRepeat = false;
+
+    String? otpError;
+    String? passError;
+    String? repeatError;
+
+    Color borderColor = context.isDarkMode
+        ? AppColors.darkPrimaryButton
+        : AppColors.lightPrimaryButton;
+
+    InputDecoration _decoration(
+      String label, {
+      String? errorText,
+      Widget? suffix,
+    }) {
+      return InputDecoration(
+        labelText: label,
+        errorText: errorText,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 14,
+          horizontal: 14,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor.withOpacity(0.7), width: 2),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: borderColor, width: 3),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 3),
+        ),
+        suffixIcon: suffix,
+      );
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: !submitting,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setS) {
+            Future<void> _submit() async {
+              if (submitting) return;
+              // reset errors
+              setS(() {
+                otpError = null;
+                passError = null;
+                repeatError = null;
+              });
+
+              final otp = otpCtrl.text.trim();
+              final pass = passCtrl.text;
+              final repeat = repeatCtrl.text;
+
+              bool hasError = false;
+              if (otp.isEmpty) {
+                otpError = 'Enter the OTP';
+                hasError = true;
+              } else if (otp.length < 4) {
+                otpError = 'OTP looks too short';
+                hasError = true;
+              }
+              if (pass.length < 6) {
+                passError = 'Minimum 6 characters';
+                hasError = true;
+              }
+              if (repeat != pass) {
+                repeatError = 'Passwords do not match';
+                hasError = true;
+              }
+
+              setS(() {}); // refresh error UI
+
+              if (hasError) return;
+
+              setS(() => submitting = true);
+              await Future.delayed(
+                const Duration(milliseconds: 600),
+              ); // fake work
+              // ignore: use_build_context_synchronously
+              Navigator.of(ctx).pop(true);
+            }
+
+            return AlertDialog(
+              title: const Text('Reset Password'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: otpCtrl,
+                      keyboardType: TextInputType.number,
+                      enabled: !submitting,
+                      decoration: _decoration('OTP', errorText: otpError),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: passCtrl,
+                      obscureText: !showPass,
+                      enabled: !submitting,
+                      decoration: _decoration(
+                        'New Password',
+                        errorText: passError,
+                        suffix: IconButton(
+                          onPressed: () => setS(() => showPass = !showPass),
+                          icon: Icon(
+                            showPass ? Icons.visibility_off : Icons.visibility,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: repeatCtrl,
+                      obscureText: !showRepeat,
+                      enabled: !submitting,
+                      decoration: _decoration(
+                        'Repeat Password',
+                        errorText: repeatError,
+                        suffix: IconButton(
+                          onPressed: () => setS(() => showRepeat = !showRepeat),
+                          icon: Icon(
+                            showRepeat
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: submitting
+                      ? null
+                      : () => Navigator.of(ctx).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: submitting ? null : _submit,
+                  child: submitting
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Reset'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (ok == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'If this were live, your password would be reset now 🎉',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      //start of scaffold
       body: Center(
         child: SingleChildScrollView(
           child: Container(
@@ -130,7 +301,7 @@ class _SigninPageState extends State<SigninPage> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
-                      onPressed: () {},
+                      onPressed: _showForgotPasswordDialog, // <-- NEW
                       child: Text(
                         "Forgot Password?",
                         style: TextStyle(
@@ -147,9 +318,7 @@ class _SigninPageState extends State<SigninPage> {
                   children: [
                     Expanded(
                       child: BasicAppButton(
-                        onPressed: () {
-                          _formSubmit();
-                        },
+                        onPressed: _formSubmit,
                         title: "Sign In",
                         height: 60,
                       ),
@@ -169,7 +338,7 @@ class _SigninPageState extends State<SigninPage> {
                       onPressed: () {
                         Navigator.pushReplacement(
                           context,
-                          MaterialPageRoute(builder: (_) => SingupPage()),
+                          MaterialPageRoute(builder: (_) => const SingupPage()),
                         );
                       },
                       child: Text(
@@ -188,39 +357,8 @@ class _SigninPageState extends State<SigninPage> {
           ),
         ),
       ),
-      //end of scaffold
     );
   }
-
-  // end of   widget
-
-  // side widgets
-
-  // build field widget
-  /*Widget _buildField(
-    BuildContext context,
-    TextEditingController controller,
-    String hint, {
-    bool isPassword = false,
-    String? errorText,
-    bool isError = false,
-  }) {
-    return TextField(
-      controller: controller,
-      obscureText: isPassword,
-      decoration: InputDecoration(
-        focusedBorder: OutlineInputBorder(),
-        enabledBorder: OutlineInputBorder(),
-        errorBorder: OutlineInputBorder(),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-
-        hintText: hint,
-        hintStyle: TextStyle(
-          color: context.isDarkMode ? Colors.white38 : Colors.black26,
-        ),
-      ),
-    );
-  }*/
 
   Widget _buildField(
     BuildContext context,
@@ -230,7 +368,7 @@ class _SigninPageState extends State<SigninPage> {
   }) {
     Color borderColor = context.isDarkMode
         ? AppColors.darkPrimaryButton
-        : AppColors.lightPrimaryButton; // cool color depending on theme
+        : AppColors.lightPrimaryButton;
 
     return TextField(
       controller: controller,
@@ -254,17 +392,13 @@ class _SigninPageState extends State<SigninPage> {
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(13),
-          borderSide: BorderSide(color: Colors.redAccent, width: 2),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 2),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(13),
-          borderSide: BorderSide(color: Colors.redAccent, width: 3),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 3),
         ),
       ),
     );
   }
-
-  // end of build field widget
-
-  // end of side widgets
-} // end of class
+}
