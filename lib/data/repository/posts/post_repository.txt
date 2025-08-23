@@ -1,0 +1,44 @@
+import 'package:julink/data/models/comment/comment.dart';
+import 'package:julink/data/models/common/page_response.dart';
+import 'package:julink/data/models/posts/post.dart';
+import 'package:julink/data/sources/posts/post_service.txt';
+
+class PostRepository {
+  final PostService service;
+  PostRepository({required this.service});
+
+  Future<PageResponse<Post>> fetchHomepage({int page = 0, int size = 10}) =>
+      service.getHomepage(page: page, size: size);
+  Future<PageResponse<Post>> fetchPosts({
+    int page = 0,
+    int size = 10,
+    int? collegeId,
+    int? authorId,
+  }) => service.getPosts(
+    page: page,
+    size: size,
+    collegeId: collegeId,
+    authorId: authorId,
+  );
+
+  /* Future<Post> create(Post post) => service.createPost(post);
+  Future<Post> edit(int postId, Post post) => service.editPost(postId, post);
+  Future<void> delete(int postId) => service.deletePost(postId);
+  Future<Post> uploadImage(
+    int postId,
+    List<int> bytes, {
+    String filename = 'image.jpg',
+  }) =>
+      service.uploadPostImage(postId: postId, bytes: bytes, filename: filename);
+
+  Future<void> like(int postId) => service.like(postId);
+  Future<void> unlike(int postId) => service.unlike(postId);
+
+  Future<List<Comment>> comments(int postId) => service.getComments(postId);
+  Future<Comment> addComment(int postId, Comment c) =>
+      service.createComment(postId, c);
+  Future<Comment> updateComment(int commentId, Comment c) =>
+      service.editComment(commentId, c);
+  Future<void> removeComment(int commentId) => service.deleteComment(commentId);
+*/
+}

@@ -3,6 +3,7 @@ import 'package:flutter_svg/svg.dart';
 import 'package:julink/common/helper/is_dark_mode.dart';
 import 'package:julink/core/configs/assets/app_vectors.dart';
 import 'package:julink/core/configs/theme/app_colors.dart';
+import 'package:julink/presentation/home/pages/feed/page/feed_page.dart';
 import 'package:julink/presentation/home/pages/profile/pages/profile_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,8 +37,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> _pages = [
-      Container(child: Text("main page here")),
-
+      FeedPage(),
       _token != null
           ? ProfilePage(token: _token!)
           : Container(child: Text("no token")),

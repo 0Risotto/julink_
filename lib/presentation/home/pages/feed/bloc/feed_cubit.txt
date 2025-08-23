@@ -1,0 +1,234 @@
+/*import 'dart:typed_data';
+import 'package:equatable/equatable.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:julink/data/models/posts/post.dart';
+import 'package:julink/data/repository/posts/post_repository.txt';
+
+class FeedCubit extends Cubit<FeedState> {
+  FeedCubit(this.repo) : super(const FeedState());
+  final PostRepository repo;
+  static const int _pageSize = 10;
+
+  // -------------------- INITIAL LOAD --------------------
+  Future<void> loadInitial() async {
+    if (state.loading) return; // guard to prevent double load
+    emit(
+      state.copyWith(loading: true, error: null, page: 0, endReached: false),
+    );
+    try {
+      final page0 = await repo.fetchHomepage(page: 0, size: _pageSize);
+      emit(
+        state.copyWith(
+          posts: page0.content,
+          loading: false,
+          endReached: page0.last,
+          page: 0,
+        ),
+      );
+    } catch (e) {
+      emit(state.copyWith(loading: false, error: _mapError(e)));
+    }
+  }
+
+  // -------------------- LOAD MORE --------------------
+  Future<void> loadMore() async {
+    if (state.loadingMore || state.endReached) return;
+    emit(state.copyWith(loadingMore: true));
+    try {
+      final next = state.page + 1;
+      final p = await repo.fetchHomepage(page: next, size: _pageSize);
+      emit(
+        state.copyWith(
+          posts: [...state.posts, ...p.content],
+          loadingMore: false,
+          endReached: p.last,
+          page: next,
+        ),
+      );
+    } catch (e) {
+      emit(state.copyWith(loadingMore: false, error: _mapError(e)));
+    }
+  }
+
+  // -------------------- LIKE --------------------
+  Future<void> like(int postId) async {
+    if (state.likingIds.contains(postId)) return;
+    emit(state.copyWith(likingIds: {...state.likingIds, postId}));
+    try {
+      await repo.like(postId);
+      final updated = state.posts
+          .map(
+            (p) => p.id == postId ? p.copyWith(likeCount: p.likeCount + 1) : p,
+          )
+          .toList();
+      emit(state.copyWith(posts: updated));
+    } catch (e) {
+      emit(state.copyWith(error: _mapError(e)));
+    } finally {
+      final s = {...state.likingIds}..remove(postId);
+      emit(state.copyWith(likingIds: s));
+    }
+  }
+
+  // -------------------- UNLIKE --------------------
+  Future<void> unlike(int postId) async {
+    if (state.likingIds.contains(postId)) return;
+    emit(state.copyWith(likingIds: {...state.likingIds, postId}));
+    try {
+      await repo.unlike(postId);
+      final updated = state.posts
+          .map(
+            (p) => p.id == postId
+                ? p.copyWith(
+                    likeCount: (p.likeCount - 1).clamp(0, 1 << 31).toInt(),
+                  ) // fixed cast
+                : p,
+          )
+          .toList();
+      emit(state.copyWith(posts: updated));
+    } catch (e) {
+      emit(state.copyWith(error: _mapError(e)));
+    } finally {
+      final s = {...state.likingIds}..remove(postId);
+      emit(state.copyWith(likingIds: s));
+    }
+  }
+
+  // -------------------- CREATE --------------------
+  Future<void> create({
+    required int authorId,
+    required String content,
+    String? title,
+    List<int>? imageBytes,
+  }) async {
+    try {
+      final created = await repo.create(
+        Post(
+          id: 0,
+          authorId: authorId,
+          authorUsername: '',
+          content: content,
+          postTitle: title,
+          createdAt: DateTime.now(),
+          image: imageBytes == null ? null : Uint8List.fromList(imageBytes),
+        ),
+      );
+      emit(state.copyWith(posts: [created, ...state.posts]));
+    } catch (e) {
+      emit(state.copyWith(error: _mapError(e)));
+    }
+  }
+
+  // -------------------- REFRESH --------------------
+  Future<void> refresh() async {
+    emit(
+      state.copyWith(loading: true, error: null, page: 0, endReached: false),
+    );
+    try {
+      final page0 = await repo.fetchHomepage(page: 0, size: _pageSize);
+      emit(
+        state.copyWith(
+          posts: page0.content,
+          loading: false,
+          endReached: page0.last,
+          page: 0,
+        ),
+      );
+    } catch (e) {
+      emit(state.copyWith(loading: false, error: _mapError(e)));
+    }
+  }
+
+  // -------------------- ERROR MAPPER --------------------
+  String _mapError(Object e) {
+    final msg = e.toString();
+    if (msg.contains('401')) return 'Unauthorized – please log in again.';
+    if (msg.contains('403')) return 'Forbidden – you don’t have access.';
+    if (msg.contains('404')) return 'Not found.';
+    if (msg.contains('415')) return 'Unsupported media type.';
+    if (msg.contains('timeout')) return 'Request timed out.';
+    return msg;
+  }
+}
+
+// ================== STATE ==================
+class FeedState extends Equatable {
+  final List<Post> posts;
+  final bool loading;
+  final bool loadingMore;
+  final bool endReached;
+  final String? error;
+  final int page;
+  final Set<int> likingIds;
+
+  const FeedState({
+    this.posts = const [],
+    this.loading = false,
+    this.loadingMore = false,
+    this.endReached = false,
+    this.error,
+    this.page = 0,
+    this.likingIds = const {},
+  });
+
+  FeedState copyWith({
+    List<Post>? posts,
+    bool? loading,
+    bool? loadingMore,
+    bool? endReached,
+    String? error,
+    int? page,
+    Set<int>? likingIds,
+  }) => FeedState(
+    posts: posts ?? this.posts,
+    loading: loading ?? this.loading,
+    loadingMore: loadingMore ?? this.loadingMore,
+    endReached: endReached ?? this.endReached,
+    error: error,
+    page: page ?? this.page,
+    likingIds: likingIds ?? this.likingIds,
+  );
+
+  @override
+  List<Object?> get props => [
+    posts,
+    loading,
+    loadingMore,
+    endReached,
+    error,
+    page,
+    likingIds,
+  ];
+}
+
+// ================== POST COPY EXTENSION ==================
+extension PostCopy on Post {
+  Post copyWith({
+    int? id,
+    int? authorId,
+    String? authorUsername,
+    String? content,
+    String? postTitle,
+    DateTime? createdAt,
+    DateTime? editedAt,
+    List<int>? taggedCollegeIds,
+    int? likeCount,
+    Uint8List? image,
+    int? commentsCount,
+  }) {
+    return Post(
+      id: id ?? this.id,
+      authorId: authorId ?? this.authorId,
+      authorUsername: authorUsername ?? this.authorUsername,
+      content: content ?? this.content,
+      postTitle: postTitle ?? this.postTitle,
+      createdAt: createdAt ?? this.createdAt,
+      editedAt: editedAt ?? this.editedAt,
+      taggedCollegeIds: taggedCollegeIds ?? this.taggedCollegeIds,
+      likeCount: likeCount ?? this.likeCount,
+      image: image ?? this.image,
+      commentsCount: commentsCount ?? this.commentsCount,
+    );
+  }
+}
+*/

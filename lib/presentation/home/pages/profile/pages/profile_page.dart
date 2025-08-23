@@ -9,7 +9,6 @@ import 'package:julink/common/helper/is_dark_mode.dart';
 import 'package:julink/common/widgets/buttons/basic_app_button.dart';
 import 'package:julink/common/widgets/buttons/common_app_button.dart';
 import 'package:julink/common/widgets/buttons/danger_buttons.dart';
-import 'package:julink/core/configs/assets/app_images.dart';
 import 'package:julink/core/configs/assets/app_vectors.dart';
 import 'package:julink/core/configs/theme/app_colors.dart';
 import 'package:julink/data/models/profile/profile.dart';
@@ -168,16 +167,19 @@ class _ProfilePageContainerState extends State<ProfilePageContainer>
                   children: [
                     Expanded(
                       child: BasicAppButton(
-                        onPressed: () {
+                        onPressed: () async {
                           // Save logic goes here
                           // You can use the controllers to fetch the updated values
-                          String username = _usernameController.text.trim();
+                          String majorName = _usernameController.text.trim();
                           String firstName = _firstNameController.text.trim();
                           String lastName = _lastNameController.text.trim();
-
-                          // Call API or update state with the new information
-                          // For example: _updateProfile(username, firstName, lastName, _profilePicture);
-
+                          var collegeid = 1;
+                          await context.read<ProfileCubit>().updateProfile(
+                            firstName: firstName,
+                            lastName: lastName,
+                            major: majorName,
+                            collegeId: collegeid,
+                          );
                           // Close the dialog after saving
                           Navigator.of(context).pop();
                         },
@@ -187,8 +189,10 @@ class _ProfilePageContainerState extends State<ProfilePageContainer>
                     Expanded(
                       child: DangerButton(
                         onPressed: () async {
-                          ProfileRepository P1;
-                          P1.deactivateAccount();
+                          await context
+                              .read<ProfileCubit>()
+                              .deleteProfileImage();
+                          Navigator.of(context).pop();
                         },
                         title: "Delete PFP",
                       ),
@@ -311,7 +315,7 @@ class _ProfilePageContainerState extends State<ProfilePageContainer>
                       children: [
                         Icon(Icons.location_city_rounded, size: 16),
                         Text(
-                          widget.profile.collegeName,
+                          "${widget.profile.firstName} ${widget.profile.lastName}",
                           style: TextStyle(
                             color: context.isDarkMode
                                 ? Colors.white54

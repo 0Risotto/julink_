@@ -3,75 +3,96 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ProfileService {
-  ProfileService({this.baseUrl = "http://127.0.0.1:8080/api"});
-  final String baseUrl;
-  late String? _token;
+  ProfileService({Dio? dio, this.baseUrl = "http://127.0.0.1:8080/api"})
+    : _dio = dio ?? Dio();
 
-  // Retrieve token from SharedPreferences
-  Future<void> _getToken() async {
+  final String baseUrl; // should already include /api
+  final Dio _dio;
+
+  Future<Map<String, String>> _authHeaders() async {
     final prefs = await SharedPreferences.getInstance();
-    _token = prefs.getString('auth_token');
-    if (_token == null || _token!.isEmpty) {
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) {
       throw Exception('Token not found or is empty');
     }
+    return {'Authorization': 'Bearer $token'};
   }
 
-  // GET /profile
+  // ---------- GET /profile ----------
   Future<Response> getProfileData() async {
-    await _getToken();
-    final dio = Dio(
-      BaseOptions(
-        headers: {
-          'Authorization': 'Bearer $_token',
-          'Content-Type': 'application/json',
-        },
+    final headers = await _authHeaders();
+    return _dio.get(
+      "$baseUrl/profile",
+      options: Options(
+        headers: {...headers, 'Content-Type': 'application/json'},
       ),
     );
-    final response = await dio.get("$baseUrl/profile");
-    return response;
   }
 
-  // PUT /profile
-  Future<Response> updateProfile(Map<String, dynamic> updatedProfile) async {
-    await _getToken();
-    final dio = Dio(
-      BaseOptions(
-        headers: {
-          'Authorization': 'Bearer $_token',
-          'Content-Type': 'application/json',
-        },
+  // ---------- PUT /profile ----------
+  Future<Response> updateProfile(
+    String firstName,
+    String lastName,
+    String major,
+    int collegeId,
+  ) async {
+    final headers = await _authHeaders();
+    final body = {
+      "firstName": firstName,
+      "lastName": lastName,
+      "major": major,
+      "collegeId": collegeId,
+    };
+
+    return _dio.put(
+      "$baseUrl/profile",
+      data: body,
+      options: Options(
+        headers: {...headers, 'Content-Type': 'application/json'},
       ),
     );
-    final response = await dio.put("$baseUrl/profile", data: updatedProfile);
-    return response;
   }
 
-  // GET /profile/profile-image
-  Future<Uint8List> getProfileImage() async {
-    await _getToken();
-    final dio = Dio(
-      BaseOptions(
+  // ---------- GET /profile/profile-image ----------
+  // Returns null if 404 (no image set)
+  Future<Uint8List?> getProfileImage() async {
+    final headers = await _authHeaders();
+    final res = await _dio.get<List<int>>(
+      "$baseUrl/profile/profile-image", // no extra /api here
+      options: Options(
+        headers: headers,
         responseType: ResponseType.bytes,
-        headers: {'Authorization': 'Bearer $_token'},
+        validateStatus: (code) => code != null && code < 500,
       ),
     );
-    final response = await dio.get("$baseUrl/profile/profile-image");
-    return Uint8List.fromList(response.data);
+
+    if (res.statusCode == 200 && res.data != null) {
+      return Uint8List.fromList(res.data!);
+    }
+    if (res.statusCode == 404) return null; // no image
+    throw DioException(
+      requestOptions: res.requestOptions,
+      response: res,
+      error: 'Failed to fetch profile image (status ${res.statusCode})',
+      type: DioExceptionType.badResponse,
+    );
   }
 
-  // DELETE /profile/profile-image
+  // ---------- DELETE /profile/profile-image ----------
   Future<Response> deleteProfileImage() async {
-    await _getToken();
-    final dio = Dio(BaseOptions(headers: {'Authorization': 'Bearer $_token'}));
-    final response = await dio.delete("$baseUrl/profile/profile-image");
-    return response;
+    final headers = await _authHeaders();
+    return _dio.delete(
+      "$baseUrl/profile/profile-image",
+      options: Options(headers: headers),
+    );
   }
 
-  // PUT /profile/deactivate
+  // ---------- PUT /profile/deactivate ----------
   Future<Response> deactivateAccount() async {
-    await _getToken();
-    final dio = Dio(BaseOptions(headers: {'Authorization': 'Bearer $_token'}));
-    final response = await dio.put("$baseUrl/profile/deactivate");
-    return response;
+    final headers = await _authHeaders();
+    return _dio.put(
+      "$baseUrl/profile/deactivate",
+      options: Options(headers: headers),
+    );
   }
 }

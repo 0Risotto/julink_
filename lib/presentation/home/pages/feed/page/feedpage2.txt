@@ -1,0 +1,467 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:julink/data/repository/posts/post_repository.txt';
+import 'package:julink/data/sources/posts/post_service.txt';
+import 'package:julink/presentation/home/pages/feed/bloc/feed_cubit2.txt';
+
+class HomeFeedPage extends StatelessWidget {
+  const HomeFeedPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return RepositoryProvider(
+      create: (_) => PostRepository(service: PostService()),
+      child: BlocProvider(
+        create: (ctx) => FeedCubit(ctx.read<PostRepository>())..loadInitial(),
+        child: const _HomeFeedScaffold(),
+      ),
+    );
+  }
+}
+
+class _HomeFeedScaffold extends StatelessWidget {
+  const _HomeFeedScaffold();
+
+  @override
+  Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width > 1000;
+    return Scaffold(
+      body: SafeArea(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Expanded(
+              child: Align(alignment: Alignment.topCenter, child: _FeedArea()),
+            ),
+            // keep right gutter for trends/follows if wide
+          ],
+        ),
+      ),
+      floatingActionButton: _CreatePostFab(onTap: () {}),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+    );
+  }
+}
+
+// =================== FEED AREA ===================
+class _FeedArea extends StatefulWidget {
+  const _FeedArea();
+
+  @override
+  State<_FeedArea> createState() => _FeedAreaState();
+}
+
+class _FeedAreaState extends State<_FeedArea> {
+  final _scrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(() {
+      final cubit = context.read<FeedCubit>();
+      if (_scrollCtrl.position.pixels >=
+          _scrollCtrl.position.maxScrollExtent - 300) {
+        cubit.loadMore();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 760),
+      child: BlocBuilder<FeedCubit, FeedState>(
+        builder: (context, state) {
+          return ListView(
+            controller: _scrollCtrl,
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+            children: [
+              const _PostComposer(),
+              const SizedBox(height: 16),
+              if (state.loading && state.posts.isEmpty)
+                const _FeedLoader()
+              else if (state.error != null && state.posts.isEmpty)
+                _ErrorCard(message: state.error!)
+              else ...[
+                for (final p in state.posts) ...[
+                  _PostCard(
+                    postId: p.id,
+                    avatar:
+                        'https://i.pravatar.cc/100?img=${(p.authorId % 20) + 1}',
+                    author: p.authorUsername.isEmpty
+                        ? 'User #${p.authorId}'
+                        : p.authorUsername,
+                    timeAgo: _relative(p.createdAt),
+                    text: p.postTitle == null
+                        ? p.content
+                        : '${p.postTitle}\n\n${p.content}',
+                    tags: const [],
+                    likes: p.likeCount,
+                    comments: p.commentsCount ?? 0,
+                    shares: 0,
+                    imageBytes: p.image,
+                    onLike: () => context.read<FeedCubit>().like(p.id),
+                    onUnlike: () => context.read<FeedCubit>().unlike(p.id),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                if (state.loadingMore) const _FeedLoader(small: true),
+                if (state.endReached) const _EndOfFeed(),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+String _relative(DateTime dt) {
+  final d = DateTime.now().difference(dt);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  if (d.inDays < 7) return '${d.inDays}d ago';
+  return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+}
+
+class _FeedLoader extends StatelessWidget {
+  final bool small;
+  const _FeedLoader({this.small = false});
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: EdgeInsets.all(small ? 12 : 24),
+      child: const CircularProgressIndicator(),
+    ),
+  );
+}
+
+class _EndOfFeed extends StatelessWidget {
+  const _EndOfFeed();
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.all(16.0),
+    child: Center(child: Text('You\'re all caught up')),
+  );
+}
+
+// =================== POST COMPOSER ===================
+class _PostComposer extends StatefulWidget {
+  const _PostComposer();
+
+  @override
+  State<_PostComposer> createState() => _PostComposerState();
+}
+
+class _PostComposerState extends State<_PostComposer> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const CircleAvatar(
+                radius: 20,
+                backgroundImage: NetworkImage(
+                  'https://i.pravatar.cc/100?img=1',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  maxLines: null,
+                  decoration: InputDecoration(
+                    hintText: "What's on your mind?",
+                    hintStyle: const TextStyle(color: Color(0xFF98A2B3)),
+                    filled: true,
+                    fillColor: const Color(0xFFF8FAFC),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 14,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFFE6ECF5)),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () {
+                    final text = _controller.text.trim();
+                    if (text.isEmpty) return;
+                    context.read<FeedCubit>().create(
+                      authorId: 0,
+                      content: text,
+                    );
+                    _controller.clear();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    elevation: 0,
+                    backgroundColor: const Color(0xFF2F6FED),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Post',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =================== POST CARD ===================
+class _PostCard extends StatelessWidget {
+  final int postId;
+  final String avatar;
+  final String author;
+  final String timeAgo;
+  final String text;
+  final List<String> tags;
+  final int likes;
+  final int comments;
+  final int shares;
+  final Uint8List? imageBytes;
+  final VoidCallback? onLike;
+  final VoidCallback? onUnlike;
+
+  const _PostCard({
+    required this.postId,
+    required this.avatar,
+    required this.author,
+    required this.timeAgo,
+    required this.text,
+    required this.tags,
+    required this.likes,
+    required this.comments,
+    required this.shares,
+    this.imageBytes,
+    this.onLike,
+    this.onUnlike,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(radius: 20, backgroundImage: NetworkImage(avatar)),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    author,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    timeAgo,
+                    style: const TextStyle(
+                      color: Color(0xFF98A2B3),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: () {},
+                icon: const Icon(
+                  Icons.more_horiz_rounded,
+                  color: Color(0xFF98A2B3),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(text),
+          if (imageBytes != null) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(imageBytes!, fit: BoxFit.cover),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: -8,
+            children: [
+              for (final t in tags)
+                Chip(
+                  label: Text(t),
+                  backgroundColor: const Color(0xFFF2F4F7),
+                  side: BorderSide.none,
+                ),
+            ],
+          ),
+          const Divider(height: 24),
+          Row(
+            children: [
+              _meta(
+                icon: Icons.favorite_border,
+                label: '$likes Likes',
+                onTap: onLike,
+              ),
+              const SizedBox(width: 16),
+              _meta(
+                icon: Icons.mode_comment_outlined,
+                label: '$comments Comments',
+                onTap: () {},
+              ),
+              const SizedBox(width: 16),
+              _meta(icon: Icons.share_outlined, label: 'Share', onTap: () {}),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _meta({
+    required IconData icon,
+    required String label,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: const Color(0xFF667085)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF667085),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =================== SHARED ===================
+class _Card extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  const _Card({required this.child, this.padding = const EdgeInsets.all(16)});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 20,
+            color: Color(0x1A101828),
+            offset: Offset(0, 8),
+          ),
+        ],
+        border: Border.all(color: const Color(0xFFE6ECF5)),
+      ),
+      padding: padding,
+      child: child,
+    );
+  }
+}
+
+class _ErrorCard extends StatelessWidget {
+  final String message;
+  final VoidCallback? onRetry;
+  const _ErrorCard({required this.message, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Something went wrong',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(message, style: const TextStyle(color: Color(0xFF667085))),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed:
+                    onRetry ?? () => context.read<FeedCubit>().loadInitial(),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreatePostFab extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreatePostFab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return FloatingActionButton.extended(
+      onPressed: onTap,
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Color(0xFFE6ECF5)),
+      ),
+      icon: const Icon(Icons.add, color: Color(0xFF2F6FED)),
+      label: const Text(
+        'Create Post',
+        style: TextStyle(color: Color(0xFF2F6FED), fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}

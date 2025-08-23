@@ -1,0 +1,163 @@
+import 'package:dio/dio.dart';
+import 'package:julink/data/models/posts/post.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../models/comment/comment.dart';
+import '../../models/common/page_response.dart';
+
+class PostService {
+  PostService({Dio? dio, String? baseUrl})
+    : _dio = dio ?? Dio(),
+      _baseUrl = baseUrl ?? 'http://127.0.0.1:8080';
+
+  final Dio _dio;
+  final String _baseUrl;
+
+  Future<Map<String, String>> _authJsonHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) throw Exception('Auth token missing');
+    return {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+  }
+
+  // ------- FEED (homepage) -------
+  Future<PageResponse<Post>> getHomepage({int page = 0, int size = 10}) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.get(
+      '$_baseUrl/api/posts/homepage',
+      queryParameters: {'page': page, 'size': size},
+      options: Options(headers: headers),
+    );
+    return PageResponse.fromJson(res.data, (j) => Post.fromJson(j));
+  }
+
+  // ------- All posts with optional filters -------
+  Future<PageResponse<Post>> getPosts({
+    int page = 0,
+    int size = 10,
+    int? collegeId,
+    int? authorId,
+  }) async {
+    final headers = await _authJsonHeaders();
+    final qp = {
+      'page': page,
+      'size': size,
+      if (collegeId != null) 'collegeId': collegeId,
+      if (authorId != null) 'authorId': authorId,
+    };
+    final res = await _dio.get(
+      '$_baseUrl/api/posts',
+      queryParameters: qp,
+      options: Options(headers: headers),
+    );
+    return PageResponse.fromJson(res.data, (j) => Post.fromJson(j));
+  }
+
+  // ------- Create / Edit / Delete -------
+  Future<Post> createPost(Post body) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.post(
+      '$_baseUrl/api/posts',
+      data: body.toJson(),
+      options: Options(headers: headers),
+    );
+    return Post.fromJson(res.data);
+  }
+
+  Future<Post> editPost(int postId, Post body) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.put(
+      '$_baseUrl/api/posts/$postId',
+      data: body.toJson(),
+      options: Options(headers: headers),
+    );
+    return Post.fromJson(res.data);
+  }
+
+  Future<void> deletePost(int postId) async {
+    final headers = await _authJsonHeaders();
+    await _dio.delete(
+      '$_baseUrl/api/posts/$postId',
+      options: Options(headers: headers),
+    );
+  }
+
+  // ------- Upload image (multipart) -------
+  Future<Post> uploadPostImage({
+    required int postId,
+    required List<int> bytes,
+    String filename = 'image.jpg',
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) throw Exception('Auth token missing');
+
+    final form = FormData.fromMap({
+      'file': MultipartFile.fromBytes(bytes, filename: filename),
+    });
+
+    final res = await _dio.post(
+      '$_baseUrl/api/posts/$postId/image',
+      data: form,
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return Post.fromJson(res.data);
+  }
+
+  // ------- Likes -------
+  Future<void> like(int postId) async {
+    final headers = await _authJsonHeaders();
+    await _dio.post(
+      '$_baseUrl/api/posts/$postId/like',
+      options: Options(headers: headers),
+    );
+  }
+
+  Future<void> unlike(int postId) async {
+    final headers = await _authJsonHeaders();
+    await _dio.delete(
+      '$_baseUrl/api/posts/$postId/like',
+      options: Options(headers: headers),
+    );
+  }
+
+  // ------- Comments -------
+  Future<List<Comment>> getComments(int postId) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.get(
+      '$_baseUrl/api/posts/$postId/comments',
+      options: Options(headers: headers),
+    );
+    return (res.data as List).map((e) => Comment.fromJson(e)).toList();
+  }
+
+  Future<Comment> createComment(int postId, Comment body) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.post(
+      '$_baseUrl/api/posts/$postId/comments',
+      data: body.toJson(),
+      options: Options(headers: headers),
+    );
+    return Comment.fromJson(res.data);
+  }
+
+  Future<Comment> editComment(int commentId, Comment body) async {
+    final headers = await _authJsonHeaders();
+    final res = await _dio.put(
+      '$_baseUrl/api/comments/$commentId',
+      data: body.toJson(),
+      options: Options(headers: headers),
+    );
+    return Comment.fromJson(res.data);
+  }
+
+  Future<void> deleteComment(int commentId) async {
+    final headers = await _authJsonHeaders();
+    await _dio.delete(
+      '$_baseUrl/api/comments/$commentId',
+      options: Options(headers: headers),
+    );
+  }
+}

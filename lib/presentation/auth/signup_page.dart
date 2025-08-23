@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:julink/common/helper/is_dark_mode.dart';
 import 'package:julink/common/widgets/buttons/basic_app_button.dart';
@@ -33,7 +32,7 @@ class _SingupPageState extends State<SingupPage> {
 
   final TextEditingController _confirmPasswordController =
       TextEditingController();
-  final TextEditingController _OTPController = TextEditingController();
+  final TextEditingController _oTPController = TextEditingController();
 
   final RegExp _emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@ju\.edu\.jo$');
 
@@ -41,10 +40,6 @@ class _SingupPageState extends State<SingupPage> {
   // functions
   bool _isValidEmail(String email) {
     return _emailRegex.hasMatch(email);
-  }
-
-  bool _isValidPassword(String password) {
-    return password.length >= 8;
   }
 
   bool _passwordMatch(String password, String reEnteredPassword) {
@@ -164,10 +159,10 @@ class _SingupPageState extends State<SingupPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildField(context, _OTPController, "OTP sent to mail"),
+                _buildField(context, _oTPController, "OTP sent to mail"),
                 BasicAppButton(
                   onPressed: () {
-                    _verifyOtp(email, _OTPController.text.trim());
+                    _verifyOtp(email, _oTPController.text.trim());
                   },
                   title: "Verify OTP",
                 ),

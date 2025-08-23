@@ -1,8 +1,9 @@
+// lib/presentation/spa/profile/bloc/profile_cubit.dart
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:julink/data/models/profile/profile.dart';
 import 'package:julink/data/repository/profile/profile_repository.dart';
 
-/// ---- States ----
 abstract class ProfileState {}
 
 class ProfileInitial extends ProfileState {}
@@ -27,10 +28,13 @@ class ProfileImageDeleting extends ProfileState {}
 
 class ProfileImageDeleted extends ProfileState {}
 
-/// ---- Cubit ----
+// ✅ Update states without data
+class ProfileUpdating extends ProfileState {}
+
+class ProfileUpdated extends ProfileState {}
+
 class ProfileCubit extends Cubit<ProfileState> {
   final ProfileRepository profileRepository;
-
   ProfileCubit({required this.profileRepository}) : super(ProfileInitial()) {
     fetchProfile();
   }
@@ -38,8 +42,8 @@ class ProfileCubit extends Cubit<ProfileState> {
   Future<void> fetchProfile() async {
     emit(ProfileLoading());
     try {
-      final profile = await profileRepository.getProfileData();
-      emit(ProfileLoaded(profile));
+      final p = await profileRepository.getProfileData();
+      emit(ProfileLoaded(p));
     } catch (e) {
       emit(ProfileError('Failed to load profile: $e'));
     }
@@ -49,9 +53,8 @@ class ProfileCubit extends Cubit<ProfileState> {
     emit(ProfileImageDeleting());
     try {
       await profileRepository.deleteProfileImage();
-      final profile = await profileRepository.getProfileData();
       emit(ProfileImageDeleted());
-      emit(ProfileLoaded(profile));
+      await fetchProfile(); // refresh UI
     } catch (e) {
       emit(ProfileError('Failed to delete profile image: $e'));
     }
@@ -64,6 +67,28 @@ class ProfileCubit extends Cubit<ProfileState> {
       emit(ProfileDeactivated());
     } catch (e) {
       emit(ProfileError('Failed to deactivate account: $e'));
+    }
+  }
+
+  // ✅ Update method: no return; emit success and refresh
+  Future<void> updateProfile({
+    required String firstName,
+    required String lastName,
+    required String major,
+    required int collegeId,
+  }) async {
+    emit(ProfileUpdating());
+    try {
+      await profileRepository.updateAccount(
+        firstName,
+        lastName,
+        major,
+        collegeId,
+      );
+      emit(ProfileUpdated());
+      await fetchProfile(); // optional; remove if you don't want auto-refresh
+    } catch (e) {
+      emit(ProfileError('Failed to update profile: $e'));
     }
   }
 }

@@ -1,0 +1,172 @@
+import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:julink/data/models/posts/post.dart';
+import 'package:julink/data/repository/posts/post_repository.txt';
+
+class FeedCubit extends Cubit<FeedState> {
+  FeedCubit(this.repo) : super(const FeedState());
+  final PostRepository repo;
+  static const int _pageSize = 10;
+
+  Future<void> loadInitial() async {
+    emit(
+      state.copyWith(loading: true, error: null, page: 0, endReached: false),
+    );
+    try {
+      final page0 = await repo.fetchHomepage(page: 0, size: _pageSize);
+      emit(
+        state.copyWith(
+          posts: page0.content,
+          loading: false,
+          endReached: page0.last,
+          page: 0,
+        ),
+      );
+    } catch (e) {
+      emit(state.copyWith(loading: false, error: '$e'));
+    }
+  }
+
+  Future<void> loadMore() async {
+    if (state.loadingMore || state.endReached) return;
+    emit(state.copyWith(loadingMore: true));
+    try {
+      final next = state.page + 1;
+      final p = await repo.fetchHomepage(page: next, size: _pageSize);
+      emit(
+        state.copyWith(
+          posts: [...state.posts, ...p.content],
+          loadingMore: false,
+          endReached: p.last,
+          page: next,
+        ),
+      );
+    } catch (e) {
+      emit(state.copyWith(loadingMore: false, error: '$e'));
+    }
+  }
+
+  Future<void> like(int postId) async {
+    try {
+      await repo.like(postId);
+      final updated = state.posts
+          .map(
+            (p) => p.id == postId
+                ? Post(
+                    id: p.id,
+                    authorId: p.authorId,
+                    authorUsername: p.authorUsername,
+                    content: p.content,
+                    postTitle: p.postTitle,
+                    createdAt: p.createdAt,
+                    editedAt: p.editedAt,
+                    taggedCollegeIds: p.taggedCollegeIds,
+                    likeCount: p.likeCount + 1,
+                    image: p.image,
+                    commentsCount: p.commentsCount,
+                  )
+                : p,
+          )
+          .toList();
+      emit(state.copyWith(posts: updated));
+    } catch (_) {}
+  }
+
+  Future<void> unlike(int postId) async {
+    try {
+      await repo.unlike(postId);
+      final updated = state.posts
+          .map(
+            (p) => p.id == postId
+                ? Post(
+                    id: p.id,
+                    authorId: p.authorId,
+                    authorUsername: p.authorUsername,
+                    content: p.content,
+                    postTitle: p.postTitle,
+                    createdAt: p.createdAt,
+                    editedAt: p.editedAt,
+                    taggedCollegeIds: p.taggedCollegeIds,
+                    likeCount: (p.likeCount - 1).clamp(0, 1 << 31),
+                    image: p.image,
+                    commentsCount: p.commentsCount,
+                  )
+                : p,
+          )
+          .toList();
+      emit(state.copyWith(posts: updated));
+    } catch (_) {}
+  }
+
+  Future<void> create({
+    required int authorId,
+    required String content,
+    String? title,
+    List<int>? imageBytes,
+  }) async {
+    try {
+      final created = await repo.create(
+        Post(
+          id: 0,
+          authorId: authorId,
+          authorUsername: '',
+          content: content,
+          postTitle: title,
+          createdAt: DateTime.now(),
+          image: imageBytes == null ? null : Uint8List.fromList(imageBytes),
+        ),
+      );
+      // If you plan to upload image separately (multipart):
+      // if (imageBytes != null) await repo.uploadImage(created.id, imageBytes);
+
+      emit(state.copyWith(posts: [created, ...state.posts]));
+    } catch (e) {
+      emit(state.copyWith(error: '$e'));
+    }
+  }
+}
+
+class FeedState extends Equatable {
+  final List<Post> posts;
+  final bool loading;
+  final bool loadingMore;
+  final bool endReached;
+  final String? error;
+  final int page;
+
+  const FeedState({
+    this.posts = const [],
+    this.loading = false,
+    this.loadingMore = false,
+    this.endReached = false,
+    this.error,
+    this.page = 0,
+  });
+
+  FeedState copyWith({
+    List<Post>? posts,
+    bool? loading,
+    bool? loadingMore,
+    bool? endReached,
+    String? error,
+    int? page,
+  }) => FeedState(
+    posts: posts ?? this.posts,
+    loading: loading ?? this.loading,
+    loadingMore: loadingMore ?? this.loadingMore,
+    endReached: endReached ?? this.endReached,
+    error: error,
+    page: page ?? this.page,
+  );
+
+  @override
+  List<Object?> get props => [
+    posts,
+    loading,
+    loadingMore,
+    endReached,
+    error,
+    page,
+  ];
+}

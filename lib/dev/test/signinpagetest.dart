@@ -1,9 +1,10 @@
 import 'dart:convert';
 import 'package:julink/presentation/auth/signup_page.dart';
-import 'package:julink/presentation/home/home_page.dart';
+import 'package:julink/presentation/home/pages/feed/page/feed_page.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:julink/common/helper/is_dark_mode.dart';
 import 'package:julink/common/widgets/buttons/basic_app_button.dart';
@@ -12,14 +13,14 @@ import 'package:julink/core/configs/assets/app_vectors.dart';
 import 'package:julink/core/configs/theme/app_colors.dart';
 import 'package:http/http.dart' as http;
 
-class SigninPage extends StatefulWidget {
-  const SigninPage({super.key});
+class testingSigninPage extends StatefulWidget {
+  const testingSigninPage({super.key});
 
   @override
-  State<SigninPage> createState() => _SigninPageState();
+  State<testingSigninPage> createState() => _testingSigninPageState();
 }
 
-class _SigninPageState extends State<SigninPage> {
+class _testingSigninPageState extends State<testingSigninPage> {
   // beginning of class
 
   // text controllers
@@ -59,7 +60,7 @@ class _SigninPageState extends State<SigninPage> {
         var token = response.body;
 
         await (saveToken(token));
-        Navigator.push(context, MaterialPageRoute(builder: (_) => HomePage()));
+        Navigator.push(context, MaterialPageRoute(builder: (_) => FeedPage()));
       } else {
         _usernameController.clear();
         _passwordController.clear();
