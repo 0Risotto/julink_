@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:julink/common/helper/is_dark_mode.dart';
 import 'package:julink/core/configs/theme/app_colors.dart';
 import 'package:julink/data/models/common/page_response.dart';
@@ -43,7 +44,7 @@ class _FeedPageState extends State<FeedPage> {
   }
 
   void _handlePostCreated(Post p) {
-    setState(() => _posts.insert(0, p)); // add new post to top of feed
+    setState(() => _posts.insert(0, p)); // show new post at top
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Post published')));
@@ -96,7 +97,7 @@ class PostsContent extends StatefulWidget {
 }
 
 class _PostsContentState extends State<PostsContent> {
-  // Like state tracking
+  // like state (optimistic)
   final Map<int, bool> _liked = {};
   final Map<int, int> _likeCounts = {};
   final Set<int> _likingInFlight = {};
@@ -123,14 +124,12 @@ class _PostsContentState extends State<PostsContent> {
     final id = post.id;
     if (_likingInFlight.contains(id)) return;
     final wasLiked = _liked[id] ?? false;
-    final prevCount = _likeCounts[id] ?? (post.likeCount ?? 0);
+    final prev = _likeCounts[id] ?? (post.likeCount ?? 0);
 
     setState(() {
       _likingInFlight.add(id);
       _liked[id] = !wasLiked;
-      _likeCounts[id] = wasLiked
-          ? (prevCount - 1).clamp(0, 1 << 31)
-          : prevCount + 1;
+      _likeCounts[id] = wasLiked ? (prev - 1).clamp(0, 1 << 31) : prev + 1;
     });
 
     try {
@@ -144,7 +143,7 @@ class _PostsContentState extends State<PostsContent> {
       if (!mounted) return;
       setState(() {
         _liked[id] = wasLiked;
-        _likeCounts[id] = prevCount;
+        _likeCounts[id] = prev;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -190,6 +189,54 @@ class _PostsContentState extends State<PostsContent> {
     }
   }
 
+  // ---------- IMAGE HELPERS ----------
+  // TODO: Map your Post model to an image URL here.
+  // Example options you might have:
+  //   return post.imageUrl;                 // single URL field
+  //   return (post.images?.isNotEmpty ?? false) ? post.images!.first : null;
+  //   return post.mediaUrl;
+  String? _firstImageUrl(Post post) {
+    // CHANGE THIS LINE to match your actual Post model:
+    // If you don't have images yet, leave as null.
+    // ignore: dead_code
+    return null;
+    // Example:
+    // return post.imageUrl;
+    // or:
+    // return (post.images?.isNotEmpty ?? false) ? post.images!.first : null;
+  }
+
+  Widget _postImage(String url) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Image.network(
+          url,
+          fit: BoxFit.cover,
+          loadingBuilder: (ctx, child, progress) {
+            if (progress == null) return child;
+            return const Center(
+              child: SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          },
+          errorBuilder: (ctx, err, stack) {
+            return Container(
+              color: Colors.black12,
+              alignment: Alignment.center,
+              child: const Icon(Icons.broken_image_outlined),
+            );
+          },
+        ),
+      ),
+    );
+  }
+  // -----------------------------------
+
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
@@ -202,6 +249,7 @@ class _PostsContentState extends State<PostsContent> {
         final isLiked = _liked[id] ?? false;
         final likeCount = _likeCounts[id] ?? (post.likeCount ?? 0);
         final isBusy = _likingInFlight.contains(id);
+        final maybeImageUrl = _firstImageUrl(post);
 
         return Center(
           child: ConstrainedBox(
@@ -305,6 +353,14 @@ class _PostsContentState extends State<PostsContent> {
 
                         const SizedBox(height: 12),
 
+                        // IMAGE (above title)
+                        if (maybeImageUrl != null &&
+                            maybeImageUrl.isNotEmpty) ...[
+                          _postImage(maybeImageUrl),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // Optional title
                         if (post.postTitle != null &&
                             post.postTitle!.isNotEmpty) ...[
                           Text(
@@ -464,15 +520,71 @@ class CreatePostsContainer extends StatefulWidget {
 }
 
 class _CreatePostsContainerState extends State<CreatePostsContainer> {
-  final _titleCtrl = TextEditingController(); // currently not sent to API
+  final _titleCtrl = TextEditingController(); // optional, not sent
   final _contentCtrl = TextEditingController();
   bool _posting = false;
+
+  // Faculties (IDs -> names). Change 6 to 5 if your DB uses 5 for Engineering.
+  static const Map<int, String> _faculties = {
+    1: 'Faculty of Computer and Information Technology',
+    2: 'Faculty of Medicine',
+    3: 'Faculty of Science',
+    4: 'Faculty of Business',
+    6: 'Faculty of Engineering',
+  };
+
+  final Set<int> _selectedTags = <int>{};
 
   @override
   void dispose() {
     _titleCtrl.dispose();
     _contentCtrl.dispose();
     super.dispose();
+  }
+
+  Future<bool?> _askAddPhotoDialog() {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add a photo?'),
+        content: const Text('Do you want to attach a photo to this post?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Skip'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Add photo'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAndUploadImage(int postId) async {
+    try {
+      final picker = ImagePicker();
+      final XFile? x = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 2048,
+        imageQuality: 85,
+      );
+      if (x == null) return; // user cancelled
+
+      await widget.repo.uploadImage(postId, x);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Image uploaded')));
+    } catch (e) {
+      debugPrint('Upload failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to upload image')));
+    }
   }
 
   Future<void> _submit() async {
@@ -486,15 +598,23 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
 
     setState(() => _posting = true);
     try {
-      // TODO: let user pick tags; for now pass empty list
-      final created = await widget.repo.createPost(content, []) as Post;
-      // Clear inputs
+      final created =
+          await widget.repo.createPost(content, _selectedTags.toList()) as Post;
+
       _titleCtrl.clear();
       _contentCtrl.clear();
-      // Push to feed
+      _selectedTags.clear();
+      setState(() {});
+
       widget.onCreated(created);
+
+      final wantsImage = await _askAddPhotoDialog();
+      if (wantsImage == true) {
+        await _pickAndUploadImage(created.id);
+      }
     } catch (e) {
       debugPrint('Create post failed: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Failed to publish post')));
@@ -555,7 +675,7 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
                     ),
                     const SizedBox(height: 12),
 
-                    // Title (not used in API yet)
+                    // Title (optional)
                     TextField(
                       controller: _titleCtrl,
                       maxLines: 1,
@@ -569,7 +689,6 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
                         hintStyle: TextStyle(
                           color: isDark ? Colors.white38 : Colors.black38,
                         ),
-                        fillColor: Colors.transparent,
                         border: InputBorder.none,
                         isCollapsed: true,
                         contentPadding: EdgeInsets.zero,
@@ -613,28 +732,72 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
                       thickness: 1,
                       color: isDark ? Colors.white10 : Colors.black12,
                     ),
+                    const SizedBox(height: 12),
+
+                    // TAGS (multi-select)
+                    Text(
+                      'Tags (optional)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _faculties.entries.map((e) {
+                        final selected = _selectedTags.contains(e.key);
+                        return FilterChip(
+                          selected: selected,
+                          label: Text(
+                            e.value,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onSelected: (val) {
+                            setState(() {
+                              if (val) {
+                                _selectedTags.add(e.key);
+                              } else {
+                                _selectedTags.remove(e.key);
+                              }
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 12),
+                    Divider(
+                      height: 1,
+                      thickness: 1,
+                      color: isDark ? Colors.white10 : Colors.black12,
+                    ),
                     const SizedBox(height: 8),
 
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        if (_selectedTags.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 12.0),
+                            child: Text(
+                              'Selected: ${_selectedTags.join(', ')}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? Colors.white70 : Colors.black54,
+                              ),
+                            ),
+                          ),
+                        const Spacer(),
                         TextButton(
                           onPressed: _posting
                               ? null
                               : () {
                                   _titleCtrl.clear();
                                   _contentCtrl.clear();
+                                  _selectedTags.clear();
                                   setState(() {});
                                 },
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
                           child: Text(
                             "Clear",
                             style: TextStyle(
@@ -645,15 +808,6 @@ class _CreatePostsContainerState extends State<CreatePostsContainer> {
                         const SizedBox(width: 8),
                         ElevatedButton(
                           onPressed: _posting ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
                           child: _posting
                               ? const SizedBox(
                                   height: 18,

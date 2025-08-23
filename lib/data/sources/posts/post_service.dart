@@ -1,13 +1,13 @@
+// lib/data/sources/posts/post_service.dart
 import 'package:dio/dio.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PostService {
   final String baseUrl; // should already include /api
+  final Dio _dio;
 
   PostService({Dio? dio, this.baseUrl = "http://127.0.0.1:8080/api"})
     : _dio = dio ?? Dio();
-  final Dio _dio;
 
   Future<Map<String, String>> _authHeaders() async {
     final prefs = await SharedPreferences.getInstance();
@@ -18,9 +18,13 @@ class PostService {
     return {'Authorization': 'Bearer $token'};
   }
 
-  // feed post functions
-  //post
-  Future<dynamic> createPost(String content, List<int> taggedCollegeIds) async {
+  // -------- feed post functions --------
+
+  // POST /posts
+  Future<Response> createPost(
+    String content,
+    List<int> taggedCollegeIds,
+  ) async {
     final headers = await _authHeaders();
     final body = {"content": content, "taggedCollegeIds": taggedCollegeIds};
     return _dio.post(
@@ -32,8 +36,8 @@ class PostService {
     );
   }
 
-  //put
-  Future<dynamic> editPost(
+  // PUT (verify your endpoint path — many backends use /posts/:id)
+  Future<Response> editPost(
     int postId,
     String content,
     List<int> taggedCollegeIds,
@@ -41,7 +45,7 @@ class PostService {
     final headers = await _authHeaders();
     final body = {"content": content, "taggedCollegeIds": taggedCollegeIds};
     return _dio.put(
-      "$baseUrl/homepage/$postId",
+      "$baseUrl/homepage/$postId", // TODO: confirm this path; often it's "$baseUrl/posts/$postId"
       data: body,
       options: Options(
         headers: {...headers, 'Content-Type': 'application/json'},
@@ -49,36 +53,37 @@ class PostService {
     );
   }
 
-  // post
-  Future<dynamic> uploadImage(int postId, FileImage file) async {
-    //not done yet
+  // POST /posts/:id/image (multipart)
+  Future<Response> uploadImage(int postId, MultipartFile file) async {
     final headers = await _authHeaders();
+
+    final form = FormData.fromMap({
+      // Change 'file' if your backend expects a different field name
+      'file': file,
+    });
+
     return _dio.post(
       "$baseUrl/posts/$postId/image",
-      data: {"file": "$file"},
-      options: Options(
-        headers: {...headers, 'Content-Type': 'application/json'},
-      ),
+      data: form,
+      options: Options(headers: headers, contentType: 'multipart/form-data'),
     );
   }
 
-  Future<dynamic> deletePost(int postId) async {
+  // DELETE /posts/:id
+  Future<Response> deletePost(int postId) async {
     final headers = await _authHeaders();
-    print("post id to delete ${postId}");
     return _dio.delete(
       "$baseUrl/posts/$postId",
       data: {"postId": postId},
-
       options: Options(
         headers: {...headers, 'Content-Type': 'application/json'},
       ),
     );
   }
 
-  //------------end of feed posts functions------------------
-  Future<dynamic> getHomePage({int page = 0, int size = 10}) async {
+  // GET /posts/homepage
+  Future<Response> getHomePage({int page = 0, int size = 10}) async {
     final headers = await _authHeaders();
-    print("im in gethomepage service");
     return _dio.get(
       "$baseUrl/posts/homepage",
       options: Options(
@@ -87,10 +92,8 @@ class PostService {
     );
   }
 
-  // -- start of like funcitons
-
-  Future<dynamic> likePost(int postId) async {
-    //not done yet
+  // POST /posts/:id/like
+  Future<Response> likePost(int postId) async {
     final headers = await _authHeaders();
     return _dio.post(
       "$baseUrl/posts/$postId/like",
@@ -100,7 +103,8 @@ class PostService {
     );
   }
 
-  Future<dynamic> deleteLike(int postId) async {
+  // DELETE /posts/:id/like
+  Future<Response> deleteLike(int postId) async {
     final headers = await _authHeaders();
     return _dio.delete(
       "$baseUrl/posts/$postId/like",
@@ -109,13 +113,4 @@ class PostService {
       ),
     );
   }
-
-  // -- end of like funcitons
 }
-  
-
-  // comment functions 
-
-  //get funcitons
- 
-

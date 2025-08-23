@@ -26,9 +26,9 @@ class PagedResponse<T> {
     Map<String, dynamic> json,
     T Function(Map<String, dynamic>) fromJsonT,
   ) {
-    final list = (json['content'] as List? ?? const [])
-        .whereType<Map>()
-        .map((e) => fromJsonT(Map<String, dynamic>.from(e)))
+    final raw = (json['content'] as List? ?? const []);
+    final list = raw
+        .map((e) => fromJsonT(Map<String, dynamic>.from(e as Map)))
         .toList();
 
     return PagedResponse(

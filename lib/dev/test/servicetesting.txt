@@ -1,0 +1,248 @@
+// lib/dev/test_api.dart
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/widgets.dart';
+import 'package:julink/core/api/spring_api_services.dart';
+import 'package:julink/data/sources/posts/post_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
+
+
+// ------------------ CONFIG ------------------
+const String bearerToken =
+    'eyJhbGciOiJIUzUxMiJ9.eyJST0xFIjoiUk9MRV9VU0VSIiwic3ViIjoiQW5hc2owNCIsImlhdCI6MTc1NTg2ODEwMiwiZXhwIjoxNzU1ODg5NzAyfQ.15JpVCbfKR-vyG10UWaA69Dbjh-KT1gDiqjrQAi-pFh9T9USCbznNlaCfFX0i25mVh7Z39pDAFs4coz7NFIolQ';
+
+// Your backend base URL (no trailing slash beyond /api defined inside service)
+const String baseUrl = 'http://127.0.0.1:8080/api';
+
+// Change this to a *real other user* ID to test follow/unfollow
+const int? followeeId = null; // e.g. 2;
+
+// Optional: if you want to filter posts by college
+const int? testCollegeId = null; // e.g. 1;
+
+// ------------------------------------------------------
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('auth_token', bearerToken);
+
+  final api = PostService(baseUrl: baseUrl);
+
+  // helper to pretty print any response
+  void printResp(String label, Response r) {
+    final body = _safeJsonPreview(r.data);
+    print(
+      '\n=== $label ===\n'
+      'HTTP ${r.statusCode} ${r.requestOptions.method} ${r.requestOptions.path}\n'
+      'Data: $body',
+    );
+  }
+
+  // helper for no-content calls
+  void printOk(String label) {
+    print('\n=== $label ===\nOK (204/200 expected)');
+  }
+
+  try {
+    // 1) PROFILE
+    final profileResp = await api.getProfile();
+    printResp('GET /profile', profileResp);
+
+    final me = profileResp.data is Map ? (profileResp.data as Map) : {};
+    final int currentUserId = (me['id'] ?? me['userId'] ?? -1) as int;
+    if (currentUserId <= 0) {
+      print(
+        '!! Could not find current user id in profile response, some tests may fail.',
+      );
+    } else {
+      print('Current userId: $currentUserId');
+    }
+
+    // 2) PROFILE IMAGE (may 404 if none exists)
+    try {
+      final bytes = await api.getProfileImage();
+      print(
+        '\n=== GET /profile/profile-image ===\nBytes length: ${bytes.length}',
+      );
+    } catch (e) {
+      print('\n=== GET /profile/profile-image ===\nNo image or error: $e');
+    }
+
+    // 3) POSTS FEEDS
+    final homepage = await api.getHomepagePosts(page: 0, size: 5);
+    printResp('GET /posts/homepage', homepage);
+
+    final allPosts = await api.getPosts(page: 0, size: 5);
+    printResp('GET /posts', allPosts);
+
+    final myPosts = await api.getPosts(
+      page: 0,
+      size: 5,
+      authorId: currentUserId,
+    );
+    printResp('GET /posts?authorId', myPosts);
+
+    if (testCollegeId != null) {
+      final collegePosts = await api.getPosts(
+        page: 0,
+        size: 5,
+        collegeId: testCollegeId,
+      );
+      printResp('GET /posts?collegeId', collegePosts);
+    }
+
+    // 4) CREATE POST
+    final createdPostResp = await api.createPost({
+      // Minimal JSON – match your PostDto fields
+      'content': 'Hello from test_api at ${DateTime.now().toIso8601String()}',
+      'postTitle': 'Test Post',
+      'taggedCollegeIds': testCollegeId != null ? [testCollegeId] : [],
+      // authorId is injected server-side from token
+    });
+    printResp('POST /posts (create)', createdPostResp);
+
+    final createdPost = createdPostResp.data is Map
+        ? createdPostResp.data as Map
+        : {};
+    final int postId =
+        (createdPost['id'] ?? createdPost['postId'] ?? -1) as int;
+    if (postId <= 0) {
+      print(
+        '!! Could not parse postId from createPost response — upload/edit/comment/like tests will be skipped.',
+      );
+    }
+
+    // 5) UPLOAD POST IMAGE (if create succeeded)
+    if (postId > 0) {
+      final file = await _tinyPngMultipart();
+      final upImg = await api.uploadPostImage(postId: postId, file: file);
+      printResp('POST /posts/$postId/image (upload)', upImg);
+    }
+
+    // 6) EDIT POST (if create succeeded)
+    if (postId > 0) {
+      final edited = await api.editPost(
+        postId: postId,
+        postDtoJson: {
+          'content': 'Edited content at ${DateTime.now().toIso8601String()}',
+          'postTitle': 'Edited Title',
+        },
+      );
+      printResp('PUT /posts/$postId (edit)', edited);
+    }
+
+    // 7) COMMENTS
+    int commentId = -1;
+    if (postId > 0) {
+      final newComment = await api.createComment(
+        postId: postId,
+        commentDtoJson: {
+          'text': 'Nice post! (auto-test)',
+          // commenterId is injected server-side from token via controller
+        },
+      );
+      printResp('POST /posts/$postId/comments (create)', newComment);
+
+      final cmt = newComment.data is Map ? newComment.data as Map : {};
+      commentId = (cmt['id'] ?? cmt['commentId'] ?? -1) as int;
+
+      final comments = await api.getCommentsByPost(postId);
+      printResp('GET /posts/$postId/comments', comments);
+
+      if (commentId > 0) {
+        final editedComment = await api.editComment(
+          commentId: commentId,
+          commentDtoJson: {'text': 'Edited comment (auto-test)'},
+        );
+        printResp('PUT /comments/$commentId (edit)', editedComment);
+      }
+    }
+
+    // 8) LIKES
+    if (postId > 0) {
+      await api.addLike(postId);
+      printOk('POST /posts/$postId/like (add)');
+
+      await api.removeLike(postId);
+      printOk('DELETE /posts/$postId/like (remove)');
+    }
+
+    // 9) FOLLOW / UNFOLLOW (optional)
+    if (followeeId != null &&
+        currentUserId > 0 &&
+        followeeId != currentUserId) {
+      await api.followUser(followeeId: followeeId!, followerId: currentUserId);
+      printOk('POST /$followeeId/follow?followerId=$currentUserId');
+
+      final myFollowing = await api.getFollowing(currentUserId);
+      printResp('GET /$currentUserId/following', myFollowing);
+
+      final theirFollowers = await api.getFollowers(followeeId!);
+      printResp('GET /$followeeId/followers', theirFollowers);
+
+      await api.unfollowUser(
+        followeeId: followeeId!,
+        followerId: currentUserId,
+      );
+      printOk('DELETE /$followeeId/follow?followerId=$currentUserId');
+    } else {
+      print(
+        '\n(Skipping follow/unfollow — set followeeId to a real, different user ID.)',
+      );
+    }
+
+    // 10) CLEANUP (delete comment, delete post)
+    if (commentId > 0) {
+      await api.deleteComment(commentId);
+      printOk('DELETE /comments/$commentId');
+    }
+
+    if (postId > 0) {
+      await api.deletePost(postId);
+      printOk('DELETE /posts/$postId');
+    }
+
+    // 11) DANGEROUS: deactivate account (commented out by default)
+    // await api.deactivateAccount();
+    // printOk('PUT /profile/deactivate');
+
+    print('\n✅ Test script finished.');
+  } catch (e) {
+    print('\n❌ Test script aborted due to error:\n$e');
+  }
+}
+
+/// Return a tiny valid PNG file as Multipart (1x1 transparent pixel).
+Future<MultipartFile> _tinyPngMultipart() async {
+  // Minimal 1x1 transparent PNG bytes
+  final bytes = Uint8List.fromList(const <int>[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, // width: 1
+    0x00, 0x00, 0x00, 0x01, // height: 1
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89,
+    0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54,
+    0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00,
+    0x01, 0x0D, 0x0A, 0x2D, 0xB4,
+    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
+    0xAE, 0x42, 0x60, 0x82,
+  ]);
+  return MultipartFile.fromBytes(
+    bytes,
+    filename: 'tiny.png',
+    // contentType: HeadersContentType.png,
+  );
+}
+
+/// Safely preview JSON-ish data without throwing
+String _safeJsonPreview(dynamic data, {int maxLen = 800}) {
+  try {
+    final s = const JsonEncoder.withIndent('  ').convert(data);
+    return s.length > maxLen ? '${s.substring(0, maxLen)} …(truncated)' : s;
+  } catch (_) {
+    final s = data.toString();
+    return s.length > maxLen ? '${s.substring(0, maxLen)} …(truncated)' : s;
+  }
